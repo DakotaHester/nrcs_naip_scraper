@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nrcs-naip-scraper"
+version = "0.1.0"
+description = "A scraper for downloading NAIP imagery from USDA NRCS based on year and state."
+authors = [{ name = "Dakota Hester", email = "dh2306@msstate.edu" }]
+license = { file = "LICENSE" }
+readme = "README.md"
+keywords = ["NAIP", "scraper", "geospatial", "data"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "beautifulsoup4",
+    "requests", 
+    "tqdm",
+]
+
+[project.urls]
+homepage = "https://github.com/yourusername/nrcs-naip-scraper"
+repository = "https://github.com/yourusername/nrcs-naip-scraper"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[project.scripts]
+naip-scraper = "nrcs_naip_scraper.cli:main"
