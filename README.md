@@ -1,6 +1,7 @@
 # NRCS NAIP Scraper
 
 A Python package for downloading NAIP (National Agriculture Imagery Program) imagery data from the USDA NRCS Box folder. This tool provides both a command-line interface and programmatic API for efficiently downloading aerial imagery data organized by year and state.
+
 ## Installation
 
 ### From Source
