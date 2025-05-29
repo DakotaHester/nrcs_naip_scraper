@@ -13,7 +13,7 @@ import re
 import zipfile
 from typing import List, Dict, Optional, Any
 from tqdm import tqdm
-from .utils import parse_json_response, extract_folders, extract_files, create_directory, validate_state_abbreviation, get_page_count, valid_states
+from .utils import parse_json_response, extract_folders, extract_files, create_directory, validate_state_abbreviation, get_page_count, download_file, valid_states
 
 # Constants
 NAIP_ROOT_URL = 'https://nrcs.app.box.com/v/naip/folder/17936490251/'
@@ -175,7 +175,7 @@ class NAIPScraper:
                         # If we can't process a year, continue with others
                         continue
                 
-                return sorted(list(all_states))
+                return sorted(list([state for state in all_states if state.upper() in valid_states]))
             
             # Original logic for specific year with improved pagination
             # Get year folder
@@ -465,6 +465,7 @@ class NAIPScraper:
         folder_url = str(folder['id'])
         n_files = folder['filesCount']
         state = folder.get('parentFolderName', 'Unknown')
+        composite_type = folder['name']
         
         if n_files == 0:
             print(f"No files found in folder {folder['name']}")
@@ -485,15 +486,14 @@ class NAIPScraper:
         except Exception:
             year = 'Unknown'
         
-        desc_str = f"Downloading {year} {state.upper()} NAIP files"
-        
         i = 0
         page = 1
         
+        desc_str = f"Downloading {year} {state.upper()} {composite_type[-1]} files)"
         with tqdm(total=n_files, desc=desc_str, unit='file') as pbar:
             while i < n_files:
                 try:
-                    response = self.session.get(NAIP_URL + folder_url + f'?page={page}')
+                    response = self.session.get(NAIP_URL + folder_url + f'?page={page}') 
                     response.raise_for_status()
                     data = parse_json_response(response)
                     files = extract_files(data)
@@ -513,7 +513,7 @@ class NAIPScraper:
                         
                         # skip if the folder already exists
                         if not self.overwrite and os.path.exists(folder_name):
-                            print(f"Folder {file['name']} already exists, skipping")
+                            print(f"Folder {folder_name} already exists, skipping")
                             i += 1
                             pbar.update(1)
                             continue
@@ -527,13 +527,23 @@ class NAIPScraper:
                         else:
                             pbar.set_postfix({'Current File': file['name']})
                             
-                            # Download file
-                            file_url = DOWNLOAD_URL + str(file['id'])
-                            file_response = self.session.get(file_url)
-                            file_response.raise_for_status()
+                            try:
+                                # Download file
+                                file_url = DOWNLOAD_URL + str(file['id'])
+                                file_response = self.session.get(file_url, stream=True) # need stream=True for large files
+                                file_response.raise_for_status()
+                                
+                                download_file(file_response, filepath + '.PART')  # Save as .PART first
+                                    
+                            except KeyboardInterrupt as e:
+                                os.remove(filepath + '.PART')  # Clean up partial download
+                                raise e
+                            except Exception as e:
+                                print(f"\nError downloading {file['name']}: {e}")
+                                continue
                             
-                            with open(filepath, 'wb') as f:
-                                f.write(file_response.content)
+                            # Rename to final name
+                            os.rename(filepath + '.PART', filepath)
                         
                         # Unzip file if enabled and it's a zip file
                         if self.unzip and filepath.lower().endswith('.zip'):

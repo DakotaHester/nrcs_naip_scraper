@@ -161,3 +161,4 @@ cython_debug/
 main.py.zip
 
 .DS_Store
+data/2024
