@@ -6,13 +6,14 @@ imagery data from the USDA NRCS Box folder. Provides functionality to download
 data by year and state with automatic file organization and extraction.
 """
 
+import json
 import requests
 import os
 import re
 import zipfile
 from typing import List, Dict, Optional, Any
 from tqdm import tqdm
-from .utils import parse_json_response, extract_folders, extract_files, create_directory, validate_state_abbreviation, valid_states
+from .utils import parse_json_response, extract_folders, extract_files, create_directory, validate_state_abbreviation, get_page_count, valid_states
 
 # Constants
 NAIP_ROOT_URL = 'https://nrcs.app.box.com/v/naip/folder/17936490251/'
@@ -36,7 +37,8 @@ class NAIPScraper:
     """
     
     def __init__(self, base_url: str = "https://nrcs.app.box.com/v/naip", 
-                 output_dir: str = "data", unzip: bool = True) -> None:
+                 output_dir: str = "data", unzip: bool = True, 
+                 overwrite: bool = False) -> None:
         """
         Initialize the NAIPScraper.
         
@@ -44,10 +46,12 @@ class NAIPScraper:
             base_url: Base URL for the NAIP Box folder
             output_dir: Directory where downloaded files will be saved
             unzip: Whether to automatically extract zip files after download
+            overwrite: Whether to overwrite existing files (default False)
         """
         self.base_url = base_url
         self.output_dir = output_dir
         self.unzip = unzip
+        self.overwrite = overwrite
         self.session = requests.Session()
         
     def get_available_years(self, state: Optional[str] = None) -> List[int]:
@@ -68,19 +72,26 @@ class NAIPScraper:
         """
         try:
             # Get all years first (fast operation)
-            response = self.session.get(NAIP_ROOT_URL)
-            response.raise_for_status()
-            data = parse_json_response(response)
-            folders = extract_folders(data)
+            page = 1
             
             years = []
-            for folder in folders:
-                try:
-                    year = int(folder['name'])
-                    years.append(year)
-                except ValueError:
-                    continue
-            
+            while True:
+                response = self.session.get(NAIP_ROOT_URL + f'?page={page}')
+                response.raise_for_status()
+                data = parse_json_response(response)
+                folders = extract_folders(data)
+                
+                for folder in folders:
+                    try:
+                        year = int(folder['name'])
+                        years.append(year)
+                    except ValueError:
+                        continue
+                
+                if page >= get_page_count(data):
+                    break
+                page += 1
+                
             # If no state filter, return all years
             if state is None:
                 return sorted(years, reverse=True)
@@ -134,18 +145,31 @@ class NAIPScraper:
                 # For each year, get the states
                 for year_folder in year_folders:
                     try:
-                        year_url = NAIP_URL + str(year_folder['id'])
-                        year_response = self.session.get(year_url)
-                        year_response.raise_for_status()
-                        year_data = parse_json_response(year_response)
-                        state_folders = extract_folders(year_data)
-                        
-                        for state_folder in state_folders:
-                            state_name = validate_state_abbreviation(state_folder['name'])
-                            if state_name in valid_states:
-                                all_states.add(state_name)
+                        # Get all states for this year with proper pagination
+                        page = 1
+                        while True:
+                            year_url = NAIP_URL + str(year_folder['id']) + f'?page={page}'
+                            year_response = self.session.get(year_url)
+                            year_response.raise_for_status()
+                            year_data = parse_json_response(year_response)
+                            state_folders = extract_folders(year_data)
+                            
+                            if not state_folders:  # No more data
+                                break
                                 
-                            all_states.add(state_folder['name'])
+                            for state_folder in state_folders:
+                                try:
+                                    state_name = validate_state_abbreviation(state_folder['name'])
+                                    if state_name in valid_states:
+                                        all_states.add(state_name)
+                                except Exception:
+                                    # Add original name if validation fails
+                                    all_states.add(state_folder['name'])
+                            
+                            # Check if we've reached the last page
+                            if page >= year_data.get("pageCount", 1):
+                                break
+                            page += 1
                             
                     except Exception:
                         # If we can't process a year, continue with others
@@ -153,27 +177,42 @@ class NAIPScraper:
                 
                 return sorted(list(all_states))
             
-            # Original logic for specific year
+            # Original logic for specific year with improved pagination
             # Get year folder
-            response = self.session.get(NAIP_ROOT_URL)
-            response.raise_for_status()
-            data = parse_json_response(response)
-            folders = extract_folders(data)
+            page = 1
+            year_folder = None
             
-            year_folder = next((folder for folder in folders if folder['name'] == str(year)), None)
+            while True:
+                response = self.session.get(NAIP_ROOT_URL + f'?page={page}')
+                response.raise_for_status()
+                data = parse_json_response(response)
+                folders = extract_folders(data)
+                
+                year_folder = next((folder for folder in folders if folder['name'] == str(year)), None)
+                if year_folder or page >= get_page_count(data):
+                    break
+                page += 1
+            
             if not year_folder:
                 print(f"No folder found for year {year}")
                 return []
             
             # Get states in that year
-            year_url = NAIP_URL + str(year_folder['id'])
-            response = self.session.get(year_url)
-            response.raise_for_status()
-            data = parse_json_response(response)
-            state_folders = extract_folders(data)
+            page = 1
+            states = []
+            while True:
+                year_url = NAIP_URL + str(year_folder['id']) + str(f'?page={page}')
+                response = self.session.get(year_url)
+                response.raise_for_status()
+                data = parse_json_response(response)
+                state_folders = extract_folders(data)
+                
+                states.extend([folder['name'] for folder in state_folders])
+                if page >= get_page_count(data):
+                    break
+                page += 1
             
-            states = [folder['name'] for folder in state_folders]
-            return sorted(states)
+            return sorted([state for state in states if state.upper() in valid_states])
             
         except Exception as e:
             print(f"Error getting available states for year {year}: {e}")
@@ -332,26 +371,37 @@ class NAIPScraper:
         
         try:
             # Get year folder
-            response = self.session.get(NAIP_ROOT_URL)
-            response.raise_for_status()
-            data = parse_json_response(response)
-            folders = extract_folders(data)
-            
-            year_folder = next((folder for folder in folders if folder['name'] == str(year)), None)
+            page = 1
+            while True:
+                response = self.session.get(NAIP_ROOT_URL)
+                response.raise_for_status()
+                data = parse_json_response(response)
+                folders = extract_folders(data)
+                
+                year_folder = next((folder for folder in folders if folder['name'] == str(year)), None)
+                if year_folder or page >= get_page_count(data):
+                    break
+                page += 1
+            # If no year folder found, exit early
             if not year_folder:
                 print(f"No folder found for year {year}")
                 return
             
             # Get state folder
-            year_url = NAIP_URL + str(year_folder['id'])
-            response = self.session.get(year_url)
-            response.raise_for_status()
-            data = parse_json_response(response)
-            state_folders = extract_folders(data)
-            
-            # Case-insensitive state matching
-            state_folder = next((folder for folder in state_folders 
-                               if folder['name'].upper() == state.upper()), None)
+            page = 1
+            while True:
+                year_url = NAIP_URL + str(year_folder['id']) + f'?page={page}'
+                response = self.session.get(year_url)
+                response.raise_for_status()
+                data = parse_json_response(response)
+                state_folders = extract_folders(data)
+                
+                # Case-insensitive state matching
+                state_folder = next((folder for folder in state_folders if folder['name'].upper() == state.upper()), None)
+                if state_folder or page >= get_page_count(data):
+                    break
+                page += 1
+
             if not state_folder:
                 print(f"No folder found for state {state} in year {year}")
                 return
@@ -454,24 +504,42 @@ class NAIPScraper:
                     for file in files:
                         if i >= n_files:
                             break
+                        
+                        # overwrite logic:
                             
-                        pbar.set_postfix({'Current File': file['name']})
-                        
-                        # Download file
-                        file_url = DOWNLOAD_URL + str(file['id'])
-                        file_response = self.session.get(file_url)
-                        file_response.raise_for_status()
-                        
+                        # first - if file folder already exists (without zip extension), skip
                         filepath = os.path.join(output_dir, file['name'])
-                        with open(filepath, 'wb') as f:
-                            f.write(file_response.content)
+                        folder_name = filepath.replace('.zip', '')  # Remove .zip for folder name
+                        
+                        # skip if the folder already exists
+                        if not self.overwrite and os.path.exists(folder_name):
+                            print(f"Folder {file['name']} already exists, skipping")
+                            i += 1
+                            pbar.update(1)
+                            continue
+                        
+                        # Skip if the zip file already exists
+                        if not self.overwrite and os.path.exists(filepath):
+                            print(f"Zip file for {file['name']} already exists, skipping download")
+                            i += 1
+                            pbar.update(1)
+                            continue
+                        else:
+                            pbar.set_postfix({'Current File': file['name']})
+                            
+                            # Download file
+                            file_url = DOWNLOAD_URL + str(file['id'])
+                            file_response = self.session.get(file_url)
+                            file_response.raise_for_status()
+                            
+                            with open(filepath, 'wb') as f:
+                                f.write(file_response.content)
                         
                         # Unzip file if enabled and it's a zip file
                         if self.unzip and filepath.lower().endswith('.zip'):
                             try:
-                                zip_output_dir = os.path.join(output_dir, file['name'].replace('.zip', ''))
                                 with zipfile.ZipFile(filepath, 'r') as zip_ref:
-                                    zip_ref.extractall(zip_output_dir)
+                                    zip_ref.extractall(folder_name)
                                 # Delete the zip file after successful extraction
                                 os.remove(filepath)
                             except zipfile.BadZipFile:

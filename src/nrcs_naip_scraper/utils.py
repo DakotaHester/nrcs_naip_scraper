@@ -42,6 +42,12 @@ def validate_state_abbreviation(state: str) -> str:
     
     return state  # Return as-is if not in our validation list
 
+
+def get_page_count(data: dict) -> int:
+    """Get the total number of pages from the Box data."""
+    return data.get('/app-api/enduserapp/shared-folder', {}).get("pageCount", 1)
+
+
 valid_states = {
     'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
     'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',

@@ -56,12 +56,13 @@ def main() -> NoReturn:
         --list-years: List available years and exit
         --list-states: List available states for given year and exit
         --no-unzip: Skip automatic extraction of zip files
+        --overwrite: Overwrite existing files
         
     Examples:
         naip-scraper --year 2020 --state NC
         naip-scraper --list-years
         naip-scraper --list-states 2020
-        naip-scraper --force --output ./downloads
+        naip-scraper --force --output ./downloads --overwrite
         
     Exits:
         0: Successful completion
@@ -130,10 +131,16 @@ def main() -> NoReturn:
         help='Do not automatically unzip downloaded files'
     )
     
+    parser.add_argument(
+        '--overwrite', 
+        action='store_true',
+        help='Overwrite existing files in the output directory'
+    )
+    
     args = parser.parse_args()
     
     # Initialize scraper
-    scraper = NAIPScraper(output_dir=args.output, unzip=not args.no_unzip)
+    scraper = NAIPScraper(output_dir=args.output, unzip=not args.no_unzip, overwrite=args.overwrite)
     
     # Handle list operations
     if args.list_years is not None:
