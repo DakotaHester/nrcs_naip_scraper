@@ -554,8 +554,9 @@ class NAIPScraper:
                         folder_name = filepath.replace('.zip', '')  # Remove .zip for folder name
                         
                         # skip if the folder already exists
-                        if not self.overwrite and os.path.exists(folder_name):
-                            print(f"Folder {folder_name} already exists, skipping")
+                        mrsid_path = os.path.join(folder_name, file['name'].replace('.zip', '.sid'))
+                        if not self.overwrite and os.path.exists(mrsid_path):
+                            print(f"Data for {file['name']} already exists, skipping")
                             i += 1
                             pbar.update(1)
                             continue
