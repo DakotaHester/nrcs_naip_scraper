@@ -33,12 +33,16 @@ class NAIPScraper:
         base_url (str): Base URL for the NAIP Box folder
         output_dir (str): Directory where downloaded files will be saved
         unzip (bool): Whether to automatically extract zip files after download
+        overwrite (bool): Whether to overwrite existing files
+        cir_only (bool): Whether to download only CIR composites (<state>_c folders)
+        rgb_only (bool): Whether to download only RGB composites (<state>_n folders)
         session (requests.Session): HTTP session for making requests
     """
     
     def __init__(self, base_url: str = "https://nrcs.app.box.com/v/naip", 
                  output_dir: str = "data", unzip: bool = True, 
-                 overwrite: bool = False) -> None:
+                 overwrite: bool = False, cir_only: bool = False, 
+                 rgb_only: bool = False) -> None:
         """
         Initialize the NAIPScraper.
         
@@ -47,11 +51,21 @@ class NAIPScraper:
             output_dir: Directory where downloaded files will be saved
             unzip: Whether to automatically extract zip files after download
             overwrite: Whether to overwrite existing files (default False)
+            cir_only: Whether to download only CIR composites (<state>_c folders)
+            rgb_only: Whether to download only RGB composites (<state>_n folders)
+            
+        Note:
+            If <state>_m folders exist, they supersede both cir_only and rgb_only options.
         """
+        if cir_only and rgb_only:
+            raise ValueError("Cannot set both cir_only and rgb_only to True")
+            
         self.base_url = base_url
         self.output_dir = output_dir
         self.unzip = unzip
         self.overwrite = overwrite
+        self.cir_only = cir_only
+        self.rgb_only = rgb_only
         self.session = requests.Session()
         
     def get_available_years(self, state: Optional[str] = None) -> List[int]:
@@ -406,7 +420,7 @@ class NAIPScraper:
                 print(f"No folder found for state {state} in year {year}")
                 return
             
-            # Get composite folders (prefer multispectral over 3-band)
+            # Get composite folders with filtering logic
             state_url = NAIP_URL + str(state_folder['id'])
             response = self.session.get(state_url)
             response.raise_for_status()
@@ -414,18 +428,47 @@ class NAIPScraper:
             color_folders = extract_folders(data)
             
             composite_folders = []
+            state_lower = state.lower()
+            
+            # Find available folder types
+            multispectral_folder = None
+            natural_folder = None
+            cir_folder = None
+            
             for folder in color_folders:
                 folder_name = folder['name'].lower()
-                state_lower = state.lower()
                 
-                # Prefer multispectral (4-band) over 3-band composites
                 if state_lower + '_m' in folder_name:
-                    composite_folders = [folder]
-                    break
-                
-                if (state_lower + '_c' in folder_name or 
-                    state_lower + '_n' in folder_name):
-                    composite_folders.append(folder)
+                    multispectral_folder = folder
+                elif state_lower + '_n' in folder_name:
+                    natural_folder = folder
+                elif state_lower + '_c' in folder_name:
+                    cir_folder = folder
+            
+            # Apply filtering logic: _m supersedes both cir_only and rgb_only
+            if multispectral_folder:
+                composite_folders = [multispectral_folder]
+                print(f"Multispectral folder found ({multispectral_folder['name']}), superseding filter options")
+            elif self.cir_only:
+                if cir_folder:
+                    composite_folders = [cir_folder]
+                    print(f"CIR-only mode: downloading from {cir_folder['name']}")
+                else:
+                    print(f"No CIR folder ({state_lower}_c) found for {state} in {year}")
+                    return
+            elif self.rgb_only:
+                if natural_folder:
+                    composite_folders = [natural_folder]
+                    print(f"RGB-only mode: downloading from {natural_folder['name']} (natural color)")
+                else:
+                    print(f"No RGB folder ({state_lower}_n) found for {state} in {year}")
+                    return
+            else:
+                # Default behavior: include any available composite folders
+                if natural_folder:
+                    composite_folders.append(natural_folder)
+                if cir_folder:
+                    composite_folders.append(cir_folder)
             
             if not composite_folders:
                 print(f"No composite folders found for {state} in {year}")
@@ -489,7 +532,7 @@ class NAIPScraper:
         i = 0
         page = 1
         
-        desc_str = f"Downloading {year} {state.upper()} {composite_type[-1]} files)"
+        desc_str = f"Downloading {year} {state.upper()} {composite_type[-1]} files"
         with tqdm(total=n_files, desc=desc_str, unit='file') as pbar:
             while i < n_files:
                 try:

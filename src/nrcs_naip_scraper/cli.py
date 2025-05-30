@@ -137,10 +137,31 @@ def main() -> NoReturn:
         help='Overwrite existing files in the output directory'
     )
     
+    parser.add_argument(
+        "--cir-only",
+        action="store_true",
+        help="Download only CIR composites (<state>_c folders). Superseded by <state>_m if it exists."
+    )
+    
+    parser.add_argument(
+        "--rgb-only",
+        action="store_true",
+        help="Download only RGB composites (<state>_n folders). Superseded by <state>_m if it exists."
+    )
+    
     args = parser.parse_args()
     
+    if args.cir_only and args.rgb_only:
+        raise ValueError("Cannot use both --cir-only and --rgb-only at the same time. Please choose one.")
+    
     # Initialize scraper
-    scraper = NAIPScraper(output_dir=args.output, unzip=not args.no_unzip, overwrite=args.overwrite)
+    scraper = NAIPScraper(
+        output_dir=args.output, 
+        unzip=not args.no_unzip, 
+        overwrite=args.overwrite,
+        cir_only=args.cir_only,
+        rgb_only=args.rgb_only
+    )
     
     # Handle list operations
     if args.list_years is not None:
