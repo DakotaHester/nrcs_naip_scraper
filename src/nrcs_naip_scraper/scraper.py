@@ -548,8 +548,6 @@ class NAIPScraper:
                     for file in files:
                         if i >= n_files:
                             break
-                        
-                        # overwrite logic:
                             
                         # first - if file folder already exists (without zip extension), skip
                         filepath = os.path.join(output_dir, file['name'])
@@ -569,7 +567,10 @@ class NAIPScraper:
                             pbar.update(1)
                             continue
                         else:
-                            pbar.set_postfix({'Current File': file['name']})
+                            # search for 3 digit fpcode in file name (pattern: state letters + 3 digits)
+                            county_code = re.search(r'[a-zA-Z]+(\d{3})', file['name'])
+                            county_code = county_code.group(1) if county_code else 'Unknown'
+                            pbar.set_postfix({'County': county_code})
                             
                             try:
                                 # Download file
