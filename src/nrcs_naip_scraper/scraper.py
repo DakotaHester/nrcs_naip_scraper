@@ -448,7 +448,8 @@ class NAIPScraper:
             # Apply filtering logic: _m supersedes both cir_only and rgb_only
             if multispectral_folder:
                 composite_folders = [multispectral_folder]
-                print(f"Multispectral folder found ({multispectral_folder['name']}), superseding filter options")
+                if self.rgb_only or self.cir_only:
+                    print(f"Multispectral folder found ({multispectral_folder['name']}), superseding filter options")
             elif self.cir_only:
                 if cir_folder:
                     composite_folders = [cir_folder]
